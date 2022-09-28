@@ -56,6 +56,21 @@ PyFtdi currently supports the following features:
 * FreeBSD
 * Windows, although not officially supported
 
+## Install
+
+`cd pyftdi`
+
+`python3 -m venv venv`
+`source venv/bin/activate`
+
+`python3 -m pip install pip -U`
+`python3 -m pip install setuptools -U`
+
+`python3 -m pip install wheel`
+
+`python3 setup.py build`
+`python3 -m pip install ./`
+
 ## License
 
 `SPDX-License-Identifier: BSD-3-Clause`

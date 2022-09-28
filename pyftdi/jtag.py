@@ -286,15 +286,21 @@ class JtagController:
             out = BitSequence(bytes_=out)
         elif not isinstance(out, BitSequence):
             out = BitSequence(out)
+
         if use_last:
             (out, self._last) = (out[:-1], bool(out[-1]))
+
         byte_count = len(out)//8
         pos = 8*byte_count
         bit_count = len(out)-pos
+        bs = BitSequence()
         if byte_count:
-            self._write_bytes(out[:pos])
+            bytes_ = self._write_bytes(out[:pos])
+            bs.append(bytes_)
         if bit_count:
-            self._write_bits(out[pos:])
+            bytes_ = self._write_bits(out[pos:])
+            bs.append(bytes_)
+        return bs
 
     def write_with_read(self, out: BitSequence,
                         use_last: bool = False) -> int:
@@ -387,13 +393,28 @@ class JtagController:
         # print("READ BITS %s" % bs)
         return bs
 
-    def _write_bits(self, out: BitSequence) -> None:
+    def _write_bits(self, out: BitSequence) -> BitSequence:
         """Output bits on TDI"""
         length = len(out)
         byte = out.tobyte()
         # print("WRITE BITS %s" % out)
-        cmd = bytearray((Ftdi.WRITE_BITS_NVE_LSB, length-1, byte))
+        cmd = bytearray((Ftdi.RW_BITS_PVE_NVE_LSB, length-1, byte))
         self._stack_cmd(cmd)
+        self.sync()
+        data = self._ftdi.read_data_bytes(1, 4)
+        # need to shift bits as they are shifted in from the MSB in FTDI
+        print(f"out: {str(out)}")
+        print(f"length: {str(length)}")
+        print(f"byte: {str(byte)}")
+        print(f"cmd: {str(cmd)}")
+        print(f"data: {str(data)}")
+        print(f"len(data): {str(len(data))}")
+        print(f"type(data): {str(type(data))}")
+        print(f"length: {str(length)}")
+        byte = data[0] >> 8-length
+        bs = BitSequence(byte, length=length)
+        # print("READ BITS %s" % bs)
+        return bs
 
     def _read_bytes(self, length: int) -> BitSequence:
         """Read out bytes from TDO"""
@@ -409,15 +430,20 @@ class JtagController:
         # print("READ BYTES %s" % bs)
         return bs
 
-    def _write_bytes(self, out: BitSequence):
+    def _write_bytes(self, out: BitSequence) -> BitSequence:
         """Output bytes on TDI"""
         bytes_ = out.tobytes(msby=True)  # don't ask...
         olen = len(bytes_)-1
         # print("WRITE BYTES %s" % out)
-        cmd = bytearray((Ftdi.WRITE_BYTES_NVE_LSB, olen & 0xff,
+        cmd = bytearray((Ftdi.RW_BYTES_PVE_NVE_LSB, olen & 0xff,
                           (olen >> 8) & 0xff))
         cmd.extend(bytes_)
         self._stack_cmd(cmd)
+        self.sync()
+        data = self._ftdi.read_data_bytes(olen, 4)
+        bs = BitSequence(bytes_=data, length=8*olen)
+        # print("READ BYTES %s" % bs)
+        return bs
 
     def _write_bytes_raw(self, out: BitSequence):
         """Output bytes on TDI"""
@@ -496,21 +522,23 @@ class JtagEngine:
         """Change the current TAP controller to the IDLE state"""
         self.change_state('run_test_idle')
 
-    def write_ir(self, instruction) -> None:
+    def write_ir(self, instruction) -> BitSequence:
         """Change the current instruction of the TAP controller"""
         self.change_state('shift_ir')
-        self._ctrl.write(instruction)
+        ret = self._ctrl.write(instruction)
         self.change_state('update_ir')
+        return ret
 
     def capture_ir(self) -> None:
         """Capture the current instruction from the TAP controller"""
         self.change_state('capture_ir')
 
-    def write_dr(self, data) -> None:
+    def write_dr(self, data) -> BitSequence:
         """Change the data register of the TAP controller"""
         self.change_state('shift_dr')
-        self._ctrl.write(data)
+        ret = self._ctrl.write(data)
         self.change_state('update_dr')
+        return ret
 
     def read_dr(self, length: int) -> BitSequence:
         """Read the data register from the TAP controller"""
